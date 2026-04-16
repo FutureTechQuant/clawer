@@ -48,7 +48,7 @@ jobs:
         id: run-crawler
         continue-on-error: true
         run: |
-          python scripts/crawl-chsi-majors.py
+          python -m scripts.crawl_chsi_majors
 
       - name: Check output files
         id: check-output

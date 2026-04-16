@@ -48,7 +48,7 @@ jobs:
         id: run-crawler
         continue-on-error: true
         run: |
-          python scripts/crawl-xuezhi-majors.py
+          python -m scripts.crawl_xuezhi_majors
 
       - name: Check output files
         id: check-output
