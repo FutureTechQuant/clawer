@@ -21,7 +21,7 @@ def unique_keep_order(items):
     seen = set()
     out = []
     for item in items:
-        key = json.dumps(item, ensure_ascii=False, sort_keys=True) if isinstance(item, (dict, list)) else item
+        key = json.dumps(item, ensure_ascii=False, sort_keys=True) if isinstance(item, (dict, list)) else str(item)
         if key in seen:
             continue
         seen.add(key)
@@ -29,14 +29,18 @@ def unique_keep_order(items):
     return out
 
 
-def extract_spec_id(detail_href: str, school_href: str):
-    for url in [detail_href, school_href]:
-        if not url:
-            continue
-        m = re.search(r"specId=(\d+)", url)
-        if m:
-            return m.group(1)
-        m = re.search(r"/detail/(\d+)", url)
-        if m:
-            return m.group(1)
-    return ""
+def extract_spec_id(url: str):
+    if not url:
+        return ""
+    m = re.search(r"specId=(\d+)", url)
+    if m:
+        return m.group(1)
+    m = re.search(r"/detail/(\d+)", url)
+    return m.group(1) if m else ""
+
+
+def extract_sch_id(url: str):
+    if not url:
+        return ""
+    m = re.search(r"schId-(\d+)", url)
+    return m.group(1) if m else ""

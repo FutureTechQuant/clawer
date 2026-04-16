@@ -1,0 +1,13 @@
+CHSI_SCHOOL_LIST_ROOT = "#app-yxk-sch-list"
+CHSI_SCHOOL_LIST_ITEM = "#app-yxk-sch-list .sch-item"
+
+CHSI_SCHOOL_HEADER_NAME = ".yxxx-header .content-header .name.yxmc"
+CHSI_SCHOOL_FOLLOW = ".followCount"
+CHSI_SCHOOL_DEPARTMENT = ".content-introduction .zgbmmc"
+CHSI_SCHOOL_TYPE = ".content-introduction .syl"
+CHSI_SCHOOL_LOCATION = ".content-info .yxszd"
+CHSI_SCHOOL_ADDRESS = ".content-info .txdz"
+CHSI_SCHOOL_SITE = ".content-info .gfwz"
+CHSI_SCHOOL_ADMISSION = ".content-info .zswz"
+CHSI_SCHOOL_PHONE = ".content-info .gfdh"
+CHSI_SCHOOL_IMAGE = ".yxxx-header-img img"
