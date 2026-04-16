@@ -10,8 +10,8 @@ from .browser import (
     wait_ready,
     wait_table,
 )
-from .config import BASE_URL, LEVEL_NAMES, OUTPUT_DIR, SCRAPE_DETAILS, SCRAPE_SCHOOLS
-from .extractors import extract_detail, extract_school_rows, extract_table_rows
+from .config import BASE_URL, LEVEL_NAMES, OUTPUT_DIR, SCRAPE_DETAILS
+from .extractors import extract_detail, extract_table_rows
 from .outputs import build_hierarchy, ensure_output, save_debug, save_json, write_partial
 from .utils import iso_now
 
@@ -91,20 +91,7 @@ def run():
                                     continue
                                 seen_major.add(key)
 
-                                if SCRAPE_DETAILS:
-                                    row["详情"] = extract_detail(context, row)
-                                else:
-                                    row["详情"] = {}
-
-                                if SCRAPE_SCHOOLS:
-                                    row["开设院校"] = extract_school_rows(context, row)
-                                else:
-                                    row["开设院校"] = {
-                                        "来源页": row.get("开设院校页", ""),
-                                        "学校数量": 0,
-                                        "学校列表": [],
-                                    }
-
+                                row["详情"] = extract_detail(context, row) if SCRAPE_DETAILS else {}
                                 flat_majors.append(row)
 
                             write_partial(flat_majors)
@@ -147,7 +134,6 @@ def run():
         "培养层次": levels_found,
         "专业总数": len(flat_majors),
         "是否抓详情": SCRAPE_DETAILS,
-        "是否抓院校": SCRAPE_SCHOOLS,
     }
 
     save_json(OUTPUT_DIR / "all.json", all_json)
@@ -157,7 +143,6 @@ def run():
     print(f"levels: {len(levels_found)}")
     print(f"majors: {len(flat_majors)}")
     print(f"detail: {SCRAPE_DETAILS}")
-    print(f"schools: {SCRAPE_SCHOOLS}")
 
 
 if __name__ == "__main__":
