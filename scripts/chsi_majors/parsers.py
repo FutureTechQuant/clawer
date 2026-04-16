@@ -61,6 +61,10 @@ def parse_satisfaction_items(text):
     return result
 
 
+def build_tag_list(level_name="", discipline="", major_class=""):
+    return [x for x in [clean_text(level_name), clean_text(discipline), clean_text(major_class)] if x]
+
+
 def parse_links_from_page(page):
     anchors = page.locator("a")
     links = {
@@ -98,16 +102,21 @@ def parse_nearby_majors(page, current_spec_id):
         href = a.get_attribute("href") or ""
         if not text or not href:
             continue
+
         full = urljoin(page.url, href)
         if "/zyk/zybk/detail/" not in full:
             continue
+
         sid = ""
         m = re.search(r"/detail/(\d+)", full)
         if m:
             sid = m.group(1)
+
         if sid and sid == current_spec_id:
             continue
-        items.append({"名称": text, "链接": full, "specId": sid})
+
+        items.append({"名称": text})
+
     return unique_keep_order(items)
 
 
@@ -120,42 +129,80 @@ def parse_postgraduate_links(page):
         href = a.get_attribute("href") or ""
         if not text or not href:
             continue
+
         full = urljoin(page.url, href)
         if "yz.chsi.com.cn/zyk/specialityDetail.do" in full:
-            parsed = urlparse(full)
-            qs = parse_qs(parsed.query)
             items.append({
                 "名称": text,
                 "链接": full,
-                "专业代码": qs.get("zydm", [""])[0],
-                "层次键": qs.get("cckey", [""])[0],
             })
+
     return unique_keep_order(items)
-
-
-def parse_recommended_schools(section_lines):
-    schools = []
-    i = 0
-    while i < len(section_lines):
-        name = section_lines[i]
-        if SCHOOL_NAME_RE.search(name):
-            score = section_lines[i + 1] if i + 1 < len(section_lines) else ""
-            count = section_lines[i + 2] if i + 2 < len(section_lines) else ""
-            if re.fullmatch(r"[0-9.]+", clean_text(score)) and re.fullmatch(r"\d+人", clean_text(count)):
-                schools.append({
-                    "学校名称": name,
-                    "评分": clean_text(score),
-                    "人数": clean_text(count),
-                })
-                i += 3
-                continue
-        i += 1
-    return schools
 
 
 def parse_employment_directions(section_lines):
     raw = "".join(section_lines).strip()
     if not raw:
         return []
+
     parts = re.split(r"[、，,；;\s]+", raw)
-    return [x for x in [clean_text(p) for p in parts] if x]
+    return [{"名称": x} for x in [clean_text(p) for p in parts] if x]
+
+
+def parse_metric_cell(text):
+    text = clean_text(text)
+    score = ""
+    count = ""
+
+    m_score = re.search(r"([0-9]+(?:\.[0-9]+)?)", text)
+    if m_score:
+        score = m_score.group(1)
+
+    m_count = re.search(r"([0-9]+)\s*人", text)
+    if m_count:
+        count = f"{m_count.group(1)}人"
+
+    return {
+        "评分": score,
+        "人数": count,
+    }
+
+
+def parse_salary_image_url(page):
+    try:
+        src = page.evaluate(
+            """
+            () => {
+                const toAbs = (u) => {
+                    try { return new URL(u, location.href).href; } catch(e) { return u || ''; }
+                };
+
+                const imgs = Array.from(document.querySelectorAll('img'));
+                for (const img of imgs) {
+                    const src = img.getAttribute('src') || '';
+                    const alt = img.getAttribute('alt') || '';
+                    const text = `${src} ${alt}`;
+                    if (/薪酬|salary/i.test(text)) return toAbs(src);
+                }
+
+                const nodes = Array.from(document.querySelectorAll('*'));
+                for (const node of nodes) {
+                    const txt = (node.innerText || '').trim();
+                    if (txt === '薪酬指数') {
+                        let cur = node;
+                        for (let i = 0; i < 4 && cur; i++) {
+                            const img = cur.querySelector && cur.querySelector('img');
+                            if (img && img.getAttribute('src')) {
+                                return toAbs(img.getAttribute('src'));
+                            }
+                            cur = cur.parentElement;
+                        }
+                    }
+                }
+                return '';
+            }
+            """
+        )
+        return clean_text(src)
+    except Exception:
+        return ""
