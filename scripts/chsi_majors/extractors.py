@@ -1,7 +1,8 @@
 from urllib.parse import urljoin
 
-from .config import BASE_URL, NAV_BLACKLIST, SECTION_ORDER, SCHOOL_NAME_RE
+from .config import BASE_URL, SECTION_ORDER
 from .parsers import (
+    build_tag_list,
     extract_section,
     find_title_and_level,
     parse_data_cutoff,
@@ -9,10 +10,10 @@ from .parsers import (
     parse_field,
     parse_graduates_scale,
     parse_links_from_page,
+    parse_metric_cell,
     parse_nearby_majors,
     parse_postgraduate_links,
-    parse_recommended_schools,
-    parse_satisfaction_items,
+    parse_salary_image_url,
 )
 from .utils import clean_text, extract_spec_id, iso_now, normalize_lines
 
@@ -23,16 +24,13 @@ def extract_table_rows(page, level_name, discipline, major_class):
         rows => rows.map(tr => {
             const tds = Array.from(tr.querySelectorAll('td'));
             const majorA = tds[0]?.querySelector('a');
-            const schoolA = tds[2]?.querySelector('a');
 
             return {
                 cell_count: tds.length,
                 major_name: (tds[0]?.innerText || '').trim(),
                 major_code: (tds[1]?.innerText || '').trim(),
-                school_text: (tds[2]?.innerText || '').trim(),
                 satisfaction: (tds[3]?.innerText || '').trim(),
                 detail_href: majorA?.getAttribute('href') || '',
-                school_href: schoolA?.getAttribute('href') || '',
             };
         })
         """
@@ -45,18 +43,13 @@ def extract_table_rows(page, level_name, discipline, major_class):
 
         major_name = clean_text(item.get("major_name", ""))
         major_code = clean_text(item.get("major_code", ""))
-        school_text = clean_text(item.get("school_text", ""))
         satisfaction = clean_text(item.get("satisfaction", ""))
 
         if not major_name or "暂无" in major_name:
             continue
 
         detail_href = urljoin(BASE_URL, item.get("detail_href", "")) if item.get("detail_href") else ""
-        school_href = urljoin(BASE_URL, item.get("school_href", "")) if item.get("school_href") else ""
-
-        spec_id = extract_spec_id(detail_href, school_href)
-        if not school_href and spec_id:
-            school_href = f"https://gaokao.chsi.com.cn/zyk/zybk/ksyxPage?specId={spec_id}"
+        spec_id = extract_spec_id(detail_href, "")
 
         rows.append({
             "培养层次": level_name,
@@ -65,20 +58,105 @@ def extract_table_rows(page, level_name, discipline, major_class):
             "专业名称": major_name,
             "专业代码": major_code,
             "专业满意度": satisfaction,
-            "开设院校文本": school_text,
-            "详情页": detail_href,
-            "开设院校页": school_href,
             "specId": spec_id,
+            "详情页": detail_href,
         })
 
     return rows
 
 
+def extract_courses(context, course_url):
+    result = {
+        "课程页 URL": course_url or "",
+        "课程列表": [],
+    }
+
+    if not course_url:
+        return result
+
+    page = context.new_page()
+    try:
+        page.goto(course_url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(1500)
+
+        rows = []
+        for selector in [
+            ".zyk-table-con .ivu-table-body tbody tr",
+            "table tbody tr",
+            ".ivu-table-body tbody tr",
+        ]:
+            locator = page.locator(selector)
+            if locator.count() > 0:
+                rows = locator.evaluate_all(
+                    """
+                    rows => rows.map(tr =>
+                        Array.from(tr.querySelectorAll('td')).map(td => (td.innerText || '').trim())
+                    )
+                    """
+                )
+                if rows:
+                    break
+
+        course_list = []
+        for cells in rows:
+            if not cells or len(cells) < 3:
+                continue
+
+            course_name = clean_text(cells[0])
+            difficulty = parse_metric_cell(cells[1] if len(cells) > 1 else "")
+            practical = parse_metric_cell(cells[2] if len(cells) > 2 else "")
+
+            if not course_name or "课程名称" in course_name:
+                continue
+
+            course_list.append({
+                "课程名称": course_name,
+                "难易度评分": difficulty["评分"],
+                "难易度人数": difficulty["人数"],
+                "实用性评分": practical["评分"],
+                "实用性人数": practical["人数"],
+            })
+
+        result["课程列表"] = course_list
+        return result
+
+    except Exception as e:
+        result["error"] = repr(e)
+        return result
+    finally:
+        page.close()
+
+
 def extract_detail(context, major_row):
     if not major_row["详情页"]:
         return {
+            "顶部信息": {
+                "标题": major_row.get("专业名称", ""),
+                "专业代码标签": major_row.get("专业代码", ""),
+                "标签列表": build_tag_list(
+                    major_row.get("培养层次", ""),
+                    major_row.get("门类", ""),
+                    major_row.get("专业类", ""),
+                ),
+                "来源 URL": "",
+                "抓取时间": iso_now(),
+            },
+            "basic_info": {
+                "专业介绍": "",
+                "统计信息": {
+                    "数据截止日期": "",
+                    "毕业生规模": "",
+                },
+                "相近专业": [],
+                "考研方向": [],
+                "就业方向": [],
+                "薪酬指数图片链接": "",
+            },
+            "courses": {
+                "课程页 URL": "",
+                "课程列表": [],
+            },
             "error": "missing_detail_url",
-            "抓取时间": iso_now(),
         }
 
     current_spec_id = major_row.get("specId", "")
@@ -94,125 +172,72 @@ def extract_detail(context, major_row):
         discipline = parse_field(text, "门类")
         major_class = parse_field(text, "专业类")
 
-        link_map, other_links = parse_links_from_page(detail_page)
+        link_map, _ = parse_links_from_page(detail_page)
 
         section_map = {}
         for heading in SECTION_ORDER:
             section_map[heading] = extract_section(lines, heading, SECTION_ORDER)
 
         stats_lines = section_map["统计信息"]["lines"]
-        salary_lines = section_map["薪酬指数"]["lines"]
+        course_url = link_map.get("开设课程", "")
+        courses = extract_courses(context, course_url)
 
         detail = {
-            "标题": title_guess or major_row.get("专业名称", ""),
-            "培养层次": level_guess or major_row.get("培养层次", ""),
-            "专业代码": code or major_row.get("专业代码", ""),
-            "门类": discipline or major_row.get("门类", ""),
-            "专业类": major_class or major_row.get("专业类", ""),
-            "链接": {
-                "详情页": major_row["详情页"],
-                "基本信息": link_map.get("基本信息", major_row["详情页"]),
-                "开设院校": link_map.get("开设院校", major_row.get("开设院校页", "")),
-                "开设课程": link_map.get("开设课程", ""),
-                "专业解读": link_map.get("专业解读", ""),
-                "图解专业": link_map.get("图解专业", ""),
-                "选科要求": link_map.get("选科要求", ""),
+            "顶部信息": {
+                "标题": title_guess or major_row.get("专业名称", ""),
+                "专业代码标签": code or major_row.get("专业代码", ""),
+                "标签列表": build_tag_list(
+                    level_guess or major_row.get("培养层次", ""),
+                    discipline or major_row.get("门类", ""),
+                    major_class or major_row.get("专业类", ""),
+                ),
+                "来源 URL": major_row["详情页"],
+                "抓取时间": iso_now(),
             },
-            "专业介绍": section_map["专业介绍"]["raw_text"],
-            "统计信息": {
-                "数据统计截止日期": parse_data_cutoff(section_map["统计信息"]["raw_text"]),
-                "全国普通高校毕业生规模": parse_graduates_scale(stats_lines),
-                "专业满意度": parse_satisfaction_items(section_map["统计信息"]["raw_text"] + "\n" + text),
-                "原始文本": section_map["统计信息"]["raw_text"],
+            "basic_info": {
+                "专业介绍": section_map["专业介绍"]["raw_text"],
+                "统计信息": {
+                    "数据截止日期": parse_data_cutoff(section_map["统计信息"]["raw_text"]),
+                    "毕业生规模": parse_graduates_scale(stats_lines),
+                },
+                "相近专业": parse_nearby_majors(detail_page, current_spec_id),
+                "考研方向": parse_postgraduate_links(detail_page),
+                "就业方向": parse_employment_directions(section_map["已毕业人员从业方向"]["lines"]),
+                "薪酬指数图片链接": parse_salary_image_url(detail_page),
             },
-            "相近专业": parse_nearby_majors(detail_page, current_spec_id),
-            "本专业推荐人数较多的高校": {
-                "原始文本": section_map["本专业推荐人数较多的高校"]["raw_text"],
-                "学校列表": parse_recommended_schools(section_map["本专业推荐人数较多的高校"]["lines"]),
-            },
-            "考研方向": parse_postgraduate_links(detail_page),
-            "已毕业人员从业方向": {
-                "原始文本": section_map["已毕业人员从业方向"]["raw_text"],
-                "列表": parse_employment_directions(section_map["已毕业人员从业方向"]["lines"]),
-            },
-            "薪酬指数": {
-                "原始文本": section_map["薪酬指数"]["raw_text"],
-                "列表": salary_lines,
-            },
-            "其他链接": other_links,
-            "抓取时间": iso_now(),
+            "courses": courses,
         }
         return detail
+
     except Exception as e:
         return {
+            "顶部信息": {
+                "标题": major_row.get("专业名称", ""),
+                "专业代码标签": major_row.get("专业代码", ""),
+                "标签列表": build_tag_list(
+                    major_row.get("培养层次", ""),
+                    major_row.get("门类", ""),
+                    major_row.get("专业类", ""),
+                ),
+                "来源 URL": major_row["详情页"],
+                "抓取时间": iso_now(),
+            },
+            "basic_info": {
+                "专业介绍": "",
+                "统计信息": {
+                    "数据截止日期": "",
+                    "毕业生规模": "",
+                },
+                "相近专业": [],
+                "考研方向": [],
+                "就业方向": [],
+                "薪酬指数图片链接": "",
+            },
+            "courses": {
+                "课程页 URL": "",
+                "课程列表": [],
+            },
             "error": repr(e),
-            "详情页": major_row["详情页"],
-            "抓取时间": iso_now(),
         }
     finally:
         detail_page.close()
-
-
-def extract_school_rows(context, major_row):
-    if not major_row["开设院校页"]:
-        return {
-            "来源页": "",
-            "学校数量": 0,
-            "学校列表": [],
-            "error": "missing_school_url",
-        }
-
-    page = context.new_page()
-    school_rows = []
-    seen = set()
-
-    try:
-        page.goto(major_row["开设院校页"], wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(1800)
-
-        page_no = 1
-        while True:
-            anchors = page.locator("a")
-            for i in range(anchors.count()):
-                a = anchors.nth(i)
-                text = clean_text(a.inner_text())
-                href = a.get_attribute("href") or ""
-
-                if not text or text in NAV_BLACKLIST:
-                    continue
-                if not SCHOOL_NAME_RE.search(text):
-                    continue
-
-                key = text
-                if key in seen:
-                    continue
-                seen.add(key)
-
-                school_rows.append({
-                    "学校名称": text,
-                    "学校链接": urljoin(page.url, href) if href else "",
-                    "页码": page_no,
-                })
-
-            next_btn = page.locator(".ivu-page-next:not(.ivu-page-disabled)")
-            if next_btn.count() == 0:
-                break
-
-            next_btn.first.click()
-            page.wait_for_timeout(1000)
-            page_no += 1
-
-        return {
-            "来源页": major_row["开设院校页"],
-            "学校数量": len(school_rows),
-            "学校列表": school_rows,
-        }
-    except Exception as e:
-        return {
-            "来源页": major_row["开设院校页"],
-            "学校数量": len(school_rows),
-            "学校列表": school_rows,
-            "error": repr(e),
-        }
-    finally:
-        page.close()
