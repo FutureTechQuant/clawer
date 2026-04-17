@@ -6,10 +6,8 @@ on:
     branches:
       - main
     paths:
-      - "scripts/crawl-chsi-majors.py"
-      - "sites/chsi/**"
-      - "sites/core/**"
-      - ".github/workflows/chsi-majors.yml"
+      - "scripts/crawl_chsi_majors.py"
+      - "sites/chsi/majors/**"
 
 permissions:
   contents: write
