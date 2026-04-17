@@ -1,3 +1,4 @@
+# sites/xuezhi/majors/parsers.py
 import re
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -35,13 +36,15 @@ def parse_metric_cell_text(text: str):
     score = ""
     count = ""
 
-    m_score = re.search(r"([0-9]+(?:\.[0-9]+)?)", text)
-    if m_score:
-        score = m_score.group(1)
+    nums = re.findall(r"\d+(?:\.\d+)?", text)
+    if nums:
+        score = nums[0]
 
     m_count = re.search(r"([\d,]+)\s*人", text)
     if m_count:
         count = m_count.group(1).replace(",", "")
+    elif len(nums) >= 2:
+        count = nums[1].replace(",", "")
 
     return {
         "评分": score,
@@ -87,14 +90,12 @@ def unique_links(items):
             or item.get("专业")
             or item.get("职业")
             or item.get("行业名称")
-            or item.get("文本")
             or ""
         )
         link = clean_text(
             item.get("链接")
             or item.get("专业链接")
             or item.get("职业链接")
-            or item.get("URL")
             or ""
         )
 
@@ -108,7 +109,6 @@ def unique_links(items):
         out.append(item)
 
     return out
-
 
 def unique_text_items(items, key="名称"):
     seen = set()

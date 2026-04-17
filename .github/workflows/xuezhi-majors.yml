@@ -2,6 +2,15 @@ name: Xuezhi Majors Crawler
 
 on:
   workflow_dispatch:
+    inputs:
+      max_majors:
+        description: "只抓前几个专业，0 表示不限制"
+        required: false
+        default: "2"
+      scrape_details:
+        description: "是否抓详情，1=是，0=否"
+        required: false
+        default: "1"
   push:
     branches:
       - main
@@ -47,7 +56,12 @@ jobs:
       - name: Run Xuezhi majors crawler
         id: run-crawler
         continue-on-error: true
+        env:
+          SCRAPE_DETAILS: ${{ github.event.inputs.scrape_details || '1' }}
+          MAX_MAJORS: ${{ github.event.inputs.max_majors || '2' }}
         run: |
+          echo "SCRAPE_DETAILS=$SCRAPE_DETAILS"
+          echo "MAX_MAJORS=$MAX_MAJORS"
           python -m scripts.crawl_xuezhi_majors
 
       - name: Check output files
