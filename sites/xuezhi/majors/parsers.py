@@ -78,7 +78,36 @@ def parse_qs_value(url: str, key: str):
 
 
 def unique_links(items):
-    return unique_keep_order([x for x in items if x.get("名称") or x.get("链接")])
+    seen = set()
+    out = []
+
+    for item in items:
+        name = clean_text(
+            item.get("名称")
+            or item.get("专业")
+            or item.get("职业")
+            or item.get("行业名称")
+            or item.get("文本")
+            or ""
+        )
+        link = clean_text(
+            item.get("链接")
+            or item.get("专业链接")
+            or item.get("职业链接")
+            or item.get("URL")
+            or ""
+        )
+
+        if not name and not link:
+            continue
+
+        key = (name, link)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+
+    return out
 
 
 def unique_text_items(items, key="名称"):
