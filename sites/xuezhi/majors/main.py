@@ -1,4 +1,3 @@
-import math
 import os
 
 from playwright.sync_api import sync_playwright
@@ -50,7 +49,72 @@ def wait_list_ready(page):
     page.wait_for_timeout(1500)
 
 
-def click_next_page(page):
+def close_modal_if_present(page):
+    try:
+        modal = page.locator(".dcwj-modal .ivu-modal-wrap, .ivu-modal-wrap")
+        if modal.count() == 0:
+            return False
+
+        visible = False
+        for i in range(min(modal.count(), 3)):
+            if modal.nth(i).is_visible():
+                visible = True
+                break
+
+        if not visible:
+            return False
+
+        log("[INFO] modal detected, trying to close it")
+
+        close_selectors = [
+            ".dcwj-modal .ivu-modal-close",
+            ".dcwj-modal .ivu-modal-close-x",
+            ".dcwj-modal .close",
+            ".ivu-modal-close",
+            ".ivu-modal-close-x",
+            ".dcwj-modal [class*='close']",
+            ".dcwj-modal button",
+        ]
+
+        for selector in close_selectors:
+            locator = page.locator(selector)
+            if locator.count() > 0:
+                for i in range(locator.count()):
+                    try:
+                        btn = locator.nth(i)
+                        if btn.is_visible():
+                            btn.click(timeout=2000)
+                            page.wait_for_timeout(800)
+                            log("[INFO] modal closed by close button")
+                            return True
+                    except Exception:
+                        continue
+
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(800)
+            log("[INFO] modal close attempted by Escape")
+            return True
+        except Exception:
+            pass
+
+        try:
+            page.locator("body").click(position={"x": 20, "y": 20}, timeout=2000)
+            page.wait_for_timeout(800)
+            log("[INFO] modal close attempted by outside click")
+            return True
+        except Exception:
+            pass
+
+        return False
+
+    except Exception:
+        return False
+
+
+def click_next_page(page, current_page):
+    close_modal_if_present(page)
+
     next_btn = page.locator(".xz-zyrw-page .ivu-page-next")
     if next_btn.count() == 0:
         return False
@@ -59,29 +123,50 @@ def click_next_page(page):
     if "ivu-page-disabled" in cls:
         return False
 
-    before_first = ""
     first_item = page.locator(".xz-zydc-list .zydc-list-table-item .zy").first
+    before_first = ""
     if first_item.count():
         before_first = first_item.inner_text().strip()
 
-    next_btn.first.click()
+    try:
+        next_btn.first.click(timeout=5000)
+    except Exception:
+        log("[WARN] normal click failed, retry after closing modal")
+        close_modal_if_present(page)
+
+        try:
+            next_btn.first.dispatch_event("click")
+        except Exception:
+            log("[WARN] dispatch_event failed, fallback to DOM click")
+            page.evaluate(
+                """
+                () => {
+                    const el = document.querySelector('.xz-zyrw-page .ivu-page-next');
+                    if (el) el.click();
+                }
+                """
+            )
+
     page.wait_for_timeout(1200)
     page.wait_for_selector(".xz-zydc-list .zydc-list-table-item", timeout=30000)
 
     try:
         page.wait_for_function(
             """
-            prev => {
-                const el = document.querySelector('.xz-zydc-list .zydc-list-table-item .zy');
-                if (!el) return false;
-                return (el.innerText || '').trim() !== prev;
+            ({ prevText, prevPage }) => {
+                const active = document.querySelector('.xz-zyrw-page .ivu-page-item-active');
+                const activePage = active ? (active.innerText || '').trim() : '';
+                const first = document.querySelector('.xz-zydc-list .zydc-list-table-item .zy');
+                const firstText = first ? (first.innerText || '').trim() : '';
+                if (activePage && Number(activePage) > Number(prevPage)) return true;
+                return firstText && firstText !== prevText;
             }
             """,
-            arg=before_first,
+            arg={"prevText": before_first, "prevPage": current_page},
             timeout=30000,
         )
     except Exception:
-        page.wait_for_timeout(1200)
+        page.wait_for_timeout(1500)
 
     return True
 
@@ -107,6 +192,8 @@ def run():
                 current_url = page.url
                 log(f"[INFO] parsing list page {current_page}/{total_pages}")
 
+                close_modal_if_present(page)
+
                 rows = extract_major_list_rows(page, current_url, current_page)
                 log(f"[INFO] page {current_page} rows: {len(rows)}")
 
@@ -131,7 +218,7 @@ def run():
                 if current_page >= total_pages:
                     break
 
-                moved = click_next_page(page)
+                moved = click_next_page(page, current_page)
                 if not moved:
                     break
                 current_page += 1
