@@ -18,6 +18,7 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   PYTHONUNBUFFERED: "1"
+  SCRAPE_DETAILS: "0"
 
 jobs:
   run-chsi-majors:
