@@ -10,6 +10,7 @@ from .extractors import extract_major_detail, extract_major_list_rows
 
 
 SCRAPE_DETAILS = os.getenv("SCRAPE_DETAILS", "1") == "1"
+MAX_MAJORS = int(os.getenv("MAX_MAJORS", "0") or "0")
 
 
 def log(message):
@@ -176,6 +177,7 @@ def run():
 
     all_rows = []
     seen = set()
+    stop_early = False
 
     with sync_playwright() as p:
         browser, context = create_browser_context(p)
@@ -183,6 +185,9 @@ def run():
 
         try:
             log("[INFO] Xuezhi majors crawler started")
+            log(f"[INFO] SCRAPE_DETAILS={SCRAPE_DETAILS}")
+            log(f"[INFO] MAX_MAJORS={MAX_MAJORS}")
+
             wait_list_ready(page)
             total_pages = get_total_pages(page)
             log(f"[INFO] total pages: {total_pages}")
@@ -204,7 +209,7 @@ def run():
                     seen.add(key)
 
                     if SCRAPE_DETAILS:
-                        log(f"[INFO] detail {current_page}-{idx}: {row['专业名称']}")
+                        log(f"[INFO] detail {current_page}-{idx}: {row['专业名称']} ({row['specId']})")
                         row["详情"] = extract_major_detail(context, row)
                     else:
                         row["详情"] = {}
@@ -214,6 +219,14 @@ def run():
                     if len(all_rows) % 20 == 0:
                         write_partial(all_rows)
                         log(f"[INFO] partial saved: {len(all_rows)}")
+
+                    if MAX_MAJORS > 0 and len(all_rows) >= MAX_MAJORS:
+                        log(f"[INFO] reached MAX_MAJORS={MAX_MAJORS}, stop early")
+                        stop_early = True
+                        break
+
+                if stop_early:
+                    break
 
                 if current_page >= total_pages:
                     break
@@ -230,6 +243,7 @@ def run():
                     "来源": MAJORS_BASE_URL,
                     "数量": len(all_rows),
                     "是否抓详情": SCRAPE_DETAILS,
+                    "最大抓取数量": MAX_MAJORS,
                     "专业列表": all_rows,
                 },
             )
